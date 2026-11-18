@@ -5,15 +5,16 @@ description: 中国知网文献检索与基本信息提取全流程：解析研�
 
 # 知网文献检索与基本信息
 
-**解释器约定**：下文所有 `{PY}` 一律指**本技能目录下 `.venv` 里的 Python**：
+**解释器约定**：下文 `{PY}` 与 `{PYC}` 都指**本技能目录下 `.venv` 里的 Python**：
 Windows 为 `<技能目录>\.venv\Scripts\python.exe`，macOS/Linux 为 `<技能目录>/.venv/bin/python`。
-首次使用先运行 `setup/install.ps1`（Windows PowerShell）或 `bash setup/install.sh`（macOS/Linux）
-创建该 venv 并安装依赖；系统 PATH 里的 `python` 通常缺 openpyxl / markitdown，不要直接用它。
+`requirements.txt` 已同时包含 openpyxl、markitdown 与 cnki-deepsearch，一个环境够用。
+首次使用先运行 `setup/install.ps1`（Windows PowerShell）或 `bash setup/install.sh`（macOS/Linux）；
+系统 PATH 里的 `python` 通常缺依赖，不要直接用它。
 `scripts/...` 一律按技能目录展开为绝对路径再执行。
 
-依赖 `cnki-deepsearch` 提供浏览器、登录与知网页面能力。动手前先读
-`references/cnki-api.md`（工具、字段码、限制、错误矩阵），不要每轮调 `cnki_syntax_guide`。
-不套用 deepsearch 的「三层渐进发现」。
+依赖 `cnki-deepsearch` 提供浏览器、登录与知网页面能力。不套用 deepsearch 的「三层渐进发现」。
+`references/cnki-api.md` **不预读**：只在工具报错（§5）、字段归属不确定（§4）、
+下载落点异常（§6）、候选 JSON 结构（§8）时按节查；不要每轮调 `cnki_syntax_guide`。
 
 ## 第 0 步 参数卡（缺省即默认，须向用户明示）
 
@@ -50,19 +51,24 @@ Windows 为 `<技能目录>\.venv\Scripts\python.exe`，macOS/Linux 为 `<技能
    记抓回条数（≠命中总数）。
 2. `{PY} scripts/ingest_candidates.py search --info-dir {run}/.workbuddy/basic_info --query-id Q1 --input {run}/.workbuddy/raw/Q1.json`
    由脚本完成字段映射（`citation_count`→`cited`）、题名清洗与去重。
-3. 对**全部候选**逐条 `cnki_get_article`：15 篇/批，每批写 `raw/abs_XX.jsonl`
-   （`{gid, abstract, keywords, authors}`），再
-   `{PY} scripts/ingest_candidates.py abstracts --info-dir {run}/.workbuddy/basic_info --input <jsonl>` 合并；
-   **禁止并发**（MCP 全局串行锁）。
+3. **摘要由脚本抓取（原文不进上下文）**：
+   `{PYC} scripts/fetch_abstracts.py --info-dir {run}/.workbuddy/basic_info --out {run}/.workbuddy/raw/abs_all.jsonl`
+   - 首次先加 `--limit 5` 验证登录态与字段，再全量（`--limit 0`）。
+   - 撞「需要安全验证」→ 停下，改用 `--headed` 让用户在小窗完成验证后重跑；脚本按 gid 跳过已抓。
+   - 单篇 <120 字会记 `suspect`，可在汇总里看数量。
+   抓完合并（复用现有命令，无需模型参与）：
+   `{PY} scripts/ingest_candidates.py abstracts --info-dir {run}/.workbuddy/basic_info --input {run}/.workbuddy/raw/abs_all.jsonl`
+   **模型不调用 `cnki_get_article`、不读摘要原文**。
 4. 打分（脚本，零 token）：
    `0.55×标题命中 + 0.35×摘要字符二元组余弦 + 0.10×被引同年归一`；
    运行 `{PY} scripts/rank_candidates.py --info-dir <dir> --card <card.json> --top-n <N>`。
    议题词命中分低于 `--min-hit`（默认 0.2）直接排除，**不用离题文献凑数**。
-5. 取前 `top_n`；只复核第 N±10 名（读标题 + 摘要前 200 字），调整须写一句理由。
+5. 取前 `top_n`；只复核第 N±10 名（标题/年份/期刊/被引/`score_detail`）；边界确有争议时
+   才读该篇摘要前 200 字（单篇，不批量），调整须写一句理由。
 6. 落盘 `{run}/.workbuddy/basic_info/cand_{gid:03d}.json`，字段见 `references/cnki-api.md`。
 7. 入选不足 `top_n`：如实报「实际 X / 目标 N」，**不降标准凑数**。
 8. 报错：`暂无数据/请稍后重试` → 等 30–60 s 用简化式重试一次；`超时` → 原样重试一次；
-   `需要安全验证` → 按「运行时策略」开小窗后重试当前操作。
+   `需要安全验证` → 摘要阶段改用 `--headed` 重跑；检索/下载阶段按「运行时策略」开小窗后重试。
 
 ## 第 4 步 汇总 xlsx → 停下等人工审核
 
@@ -71,7 +77,8 @@ Windows 为 `<技能目录>\.venv\Scripts\python.exe`，macOS/Linux 为 `<技能
 **A. `04_table/文献基本信息表.xlsx`**（两个 Sheet；检索式已在第 2 步审核通过，不再单列记录页）
 
 - Sheet1「基本信息表」：序号（=相关度排名 1..N）、题名、作者（全列表）、来源期刊、
-  发表时间、被引次数（空写「未获取」）、摘要全文、关键词组（`；`）、URL
+  发表时间、被引次数（空写「未获取」）、摘要全文（由脚本抓取，已修 503 字截断）、
+  关键词组（`；`）、URL
 - Sheet2「筛选记录」：候选号、站内序、检索式、题名、来源、年份、被引、相关度分、判定、排除理由
 
 **B. `05_download/下载清单.xlsx`**
@@ -104,9 +111,19 @@ Windows 为 `<技能目录>\.venv\Scripts\python.exe`，macOS/Linux 为 `<技能
 3. 产物：`06_markdown/*.md` + `manifest.json` + `_转换校验.md`
    （成功数、字符数 min/median/max、<2000 字告警、失败原因）。完成后停下等审核。
 
+## 阶段化运行（跨会话续跑，省 token）
+
+- 四个天然断点：第 2 步审核后 / 第 4 步建表后 / 第 5 步下载后 / 第 6 步转换后。
+- 每阶段产物都已落盘，可随时中断：`{run}/.workbuddy/cnki_run.json`（参数卡）、`raw/`（检索与摘要原样）、
+  `basic_info/cand_*.json`（候选）、`download_queue.json`、`05_download/_download_progress.jsonl`。
+- 续跑：先读 `cnki_run.json`，再按产物是否存在判断从哪一步接；**已完成的不重跑**
+  （脚本本身也做了跳过：已抓摘要、已有 md、已下载进度）。
+- 建议在断点处**开新会话**继续下一阶段：十几万 token 的上下文每轮都要重发，换会话可把成本降一个量级。
+
 ## 运行时策略
 
 - 所有 cnki 工具**串行**调用，同一时刻只发一个。
+- `fetch_abstracts.py` 不占 MCP 锁，但**同一时间不要与 MCP 调用并行**，以免触发知网风控。
 - **小窗**：默认 headless；捕获「需要安全验证」→ `cnki_co_open` 开有头窗口 → 告知用户
   「请在小窗完成验证，完成后我会自动继续」→ 重试当前操作；批次结束 `cnki_co_close`
   （只关页面，登录态保留）。
@@ -116,6 +133,6 @@ Windows 为 `<技能目录>\.venv\Scripts\python.exe`，macOS/Linux 为 `<技能
 
 1. 元数据只取检索结果行；摘要/关键词取详情页；冲突时保留检索行值并记 `conflict`。
 2. 不改写、不增删、不推断；缺失「未提取/证据不足」；被引空「未获取」（≠0）。
-3. 摘要与关键词逐字照录，**不在对话中复述**（省 token）。
+3. 摘要与关键词由脚本写入，**不在对话中读取或复述**；仅边界复核时读单篇前 200 字。
 4. 只用详情页 `#pdfDown` 取 PDF；结果页「下载」给 CAJ，禁用；绝不把 CAJ/HTML 改名 `.pdf`。
 5. 不修改 `markdown/`、`papers/`、`reference/` 下已有文件；不动 Zotero。

@@ -22,8 +22,9 @@ cnkipaper-search/
 ├── SKILL.md                        # 技能主文件（六步流程）
 ├── references/
 │   └── cnki-api.md                 # cnki-deepsearch 接口速查（工具/字段码/限制/错误矩阵）
-├── scripts/                        # 6 个确定性脚本，全部零 token
+├── scripts/                        # 7 个确定性脚本，全部零 token
 │   ├── ingest_candidates.py        #   检索/摘要 jsonl → 候选 JSON（映射/清洗/去重）
+│   ├── fetch_abstracts.py          #   直连 cnki_mcp 抓摘要（不进上下文，顺带修 503 字截断）
 │   ├── rank_candidates.py          #   相关度打分与初选（--min-hit 门槛）
 │   ├── build_basic_table.py        #   基本信息表 + 下载清单
 │   ├── read_download_list.py       #   读人工清单 → 下载队列
@@ -47,6 +48,7 @@ cnkipaper-search/
 | `cnki-deepsearch==0.2.1` | **唯一的 MCP 依赖**，PyPI 公开包（MIT），自动随 requirements 安装 |
 | `openpyxl` | 读写 xlsx |
 | `markitdown[pdf]` | PDF 转 Markdown |
+| Microsoft Edge | `CNKIBrowser` 默认 `browser_channel="msedge"`；机器上没有 Edge 时给 `fetch_abstracts.py` 加 `--channel chromium` |
 | 知网账号 | PDF 下载权限取决于机构 IP / 个人订阅 |
 
 **本技能不依赖其它技能。** `cnki-deepsearch` 提供浏览器、登录与知网页面能力，已包含在安装脚本里。

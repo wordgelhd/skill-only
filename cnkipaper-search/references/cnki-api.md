@@ -7,7 +7,7 @@
 | 工具 | 入参 | 返回 | 限制 |
 | --- | --- | --- | --- |
 | `cnki_professional_search` | `expression`（必填）、`max_results`（默认 20） | `expression` / `total_results` / `results[]` / `sidebar` | 单次上限由翻页决定；`>20` 时自动点「下一页」，每页 20 条 |
-| `cnki_get_article` | `url`（详情页 URL） | `title` / `authors[]` / `abstract` / `keywords[]` / `doi` / `source` | **无被引、无年份**；URL 带 `v=<hash>`，会过期 |
+| `cnki_get_article` | `url`（详情页 URL） | `title` / `authors[]` / `abstract` / `keywords[]` / `doi` / `source` | **无被引、无年份**；URL 带 `v=<hash>`，会过期；本技能已改由 `fetch_abstracts.py` 直连取，不再调用它 |
 | `cnki_download` | `url`（详情页 URL） | `{success, path, filename, size}` 或 `{success:false, error}` | 点击详情页 `#pdfDown`，落点固定（见 §6） |
 | `cnki_co_open` | — | `{ok, co_mode, headed, user_page_open, tabs[]}` | 会把共享浏览器**重启为有头**，常驻 |
 | `cnki_co_status` | — | 同上（不含重启） | 只查状态 |
@@ -17,6 +17,11 @@
 `results[]` 单条字段：`title` / `url` / `authors[]` / `source` / `date` / `database` /
 `citation_count`（**字符串，空串表示无**）/ `download_count`。
 `total_results` = **本次抓回条数**，不是知网命中总数，报告中不得混用。
+
+`fetch_abstracts.py` **不走 MCP**：直接 `from cnki_mcp.browser import CNKIBrowser`、
+`from cnki_mcp.parser import parse_article_detail, parse_search_results`，与 MCP 共用
+`Path.home()/.cnki_cookies.json` 登录态，但各自启动浏览器、互不占用连接。必须用
+cnki-deepsearch venv 的解释器，default venv 里没有这个包。
 
 ## 2. 字段码与运算符（必须配对）
 
@@ -46,7 +51,7 @@
 | 字段 | 唯一来源 |
 | --- | --- |
 | 题名 / 作者列表 / 来源 / 发表时间 / 被引 / URL | 检索结果行 |
-| 摘要全文 / 关键词组 / DOI / 作者全名 | `cnki_get_article` |
+| 摘要全文 / 关键词组 | `fetch_abstracts.py`（直连 `parse_article_detail`，字段与 `cnki_get_article` 一致） |
 | 引文网络 | `cnki_get_citations`（本技能不用） |
 
 冲突处理：`get_article` 的 `source` 常混入出版社/卷期，**以检索行为准**；
@@ -110,6 +115,8 @@ D:\AI proj\paper-search\cnki-deepsearch-data\downloads\
 
 `band` 取值：`include`（入选，`sel_rank` 为 1..N）/ `reserve`（第 N+1..N+15）/
 `exclude`（其余，或议题词命中分低于 `--min-hit` 被门槛挡掉；两类都必须有一句理由）。
+`abstract` 由 `fetch_abstracts.py` 写入，取自 `<input id="abstract_text">` 隐藏域，
+**长度可超过详情页 503 字上限**，属正常（503 只是 DOM 渲染上限）。
 `score_detail` 保留 `hit / cos / cos_norm / cite` 四项，便于复核打分。
 `selected=false` 的条目保留，供「筛选记录」页审计。
 
