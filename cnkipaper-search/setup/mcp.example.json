@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "cnki-deepsearch": {
+      "type": "stdio",
+      "command": "<SKILL_DIR>/.venv/Scripts/python.exe",
+      "args": [
+        "<SKILL_DIR>/setup/cnki_deepsearch_launcher.py"
+      ]
+    }
+  }
+}

@@ -1,0 +1,3 @@
+cnki-deepsearch==0.2.1
+openpyxl>=3.1
+markitdown[pdf]>=0.1.9
